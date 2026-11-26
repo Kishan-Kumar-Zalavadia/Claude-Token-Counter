@@ -33,6 +33,8 @@ Works on claude.ai's old and new interface, including the **free plan**. No acco
   <img src="docs/images/light.png" alt="Light mode" width="400">
 </div>
 -->
+<img width="811" height="159" alt="Screenshot 2026-11-26 at 11 00 17 AM" src="https://github.com/user-attachments/assets/95b3f0f5-42d8-42b4-879d-40da6a9aa07d" />
+
 
 <br>
 
