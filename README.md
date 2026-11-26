@@ -66,10 +66,10 @@ It supports both the classic claude.ai interface and the **new unified interface
 
 > Chrome and other Chromium browsers (Edge, Brave, …) that support Manifest V3.
 
-1. **Download** the latest `claude-counter.zip` from the [Releases](../../releases) page and unzip it.
+1. **Download** the latest `claude-token-counter.zip` from the [Releases](../../releases) page and unzip it.
    *(Or clone this repo.)*
 2. Open `chrome://extensions` and turn on **Developer mode** (top right).
-3. Click **Load unpacked** and select the unzipped `claude-counter` folder.
+3. Click **Load unpacked** and select the unzipped `claude-token-counter` folder.
 4. Open [claude.ai](https://claude.ai). The strip appears under the chat box.
 
 ## Quick start
@@ -144,8 +144,8 @@ Open DevTools (F12) → **Console** and filter for `Claude Counter`.
 ## Development
 
 ```bash
-git clone https://github.com/<your-username>/claude-counter.git
-cd claude-counter
+git clone https://github.com/<your-username>/claude-token-counter.git
+cd claude-token-counter
 npm test          # 130+ tests, Node 22, no dependencies
 npm run verify    # checks manifest.json and every file it references
 ```
