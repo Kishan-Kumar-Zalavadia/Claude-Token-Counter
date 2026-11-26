@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="icons/icon128.png" alt="Claude Counter Rebuilt logo" width="84" height="84">
+<img src="icons/icon128.png" alt="Claude Counter logo" width="84" height="84">
 
-# Claude Counter Rebuilt
+# Claude Counter
 
 **See your real five-hour Claude session usage and a live reset countdown, right under the chat box.**
 Works on claude.ai's old and new interface, including the **free plan**. No account, no API key, no tracking.
@@ -64,10 +64,10 @@ It supports both the classic claude.ai interface and the **new unified interface
 
 > Chrome and other Chromium browsers (Edge, Brave, …) that support Manifest V3.
 
-1. **Download** the latest `claude-counter-rebuilt.zip` from the [Releases](../../releases) page and unzip it.
+1. **Download** the latest `claude-counter.zip` from the [Releases](../../releases) page and unzip it.
    *(Or clone this repo.)*
 2. Open `chrome://extensions` and turn on **Developer mode** (top right).
-3. Click **Load unpacked** and select the unzipped `claude-counter-rebuilt` folder.
+3. Click **Load unpacked** and select the unzipped `claude-counter` folder.
 4. Open [claude.ai](https://claude.ai). The strip appears under the chat box.
 
 ## Quick start
@@ -107,7 +107,7 @@ Hover over the strip for a one-line diagnosis.
 
 ## Troubleshooting
 
-Open DevTools (F12) → **Console** and filter for `Claude Counter Rebuilt`.
+Open DevTools (F12) → **Console** and filter for `Claude Counter`.
 
 | Console code | Meaning |
 |---|---|
@@ -142,8 +142,8 @@ Open DevTools (F12) → **Console** and filter for `Claude Counter Rebuilt`.
 ## Development
 
 ```bash
-git clone https://github.com/<your-username>/claude-counter-rebuilt.git
-cd claude-counter-rebuilt
+git clone https://github.com/<your-username>/claude-counter.git
+cd claude-counter
 npm test          # 130+ tests, Node 22, no dependencies
 npm run verify    # checks manifest.json and every file it references
 ```
@@ -170,7 +170,7 @@ The automated tests pass. **This extension has not been verified against every c
 Bug reports and pull requests are welcome. When reporting a problem, please include:
 
 - your plan (free / paid) and whether you see `INTERFACE_OLD` or `INTERFACE_NEW`
-- the `[Claude Counter Rebuilt]` lines from the console (they are safe to share)
+- the `[Claude Counter]` lines from the console (they are safe to share)
 - a screenshot of the strip
 
 Please do not post cookies, tokens or full account IDs.
