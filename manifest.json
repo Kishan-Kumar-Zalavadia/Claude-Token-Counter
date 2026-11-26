@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Claude Counter Rebuilt",
+  "version": "1.0.3",
+  "minimum_chrome_version": "111",
+  "description": "Shows your real five-hour Claude session usage and a live reset countdown under the chat box on claude.ai. Works on the free plan.",
+  "permissions": [
+    "storage"
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "96": "icons/icon96.png",
+    "128": "icons/icon128.png",
+    "256": "icons/icon256.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/*"
+      ],
+      "js": [
+        "src/injected/bridge.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://claude.ai/*"
+      ],
+      "css": [
+        "src/styles.css"
+      ],
+      "js": [
+        "src/content/constants.js",
+        "src/content/diag.js",
+        "src/content/usage-core.js",
+        "src/content/bridge-client.js",
+        "src/content/ui.js",
+        "src/content/main.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

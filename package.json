@@ -1,0 +1,11 @@
+{
+  "name": "claude-counter-rebuilt",
+  "version": "1.0.3",
+  "private": true,
+  "description": "Chrome extension: five-hour Claude session usage and reset countdown. No build step; npm test runs the Node test suite (Node 22, no dependencies).",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\"",
+    "verify": "node scripts/verify-package.js"
+  }
+}
