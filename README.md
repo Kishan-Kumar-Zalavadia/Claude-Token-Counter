@@ -34,6 +34,8 @@ Works on claude.ai's old and new interface, including the **free plan**. No acco
 </div>
 -->
 <img width="811" height="159" alt="Screenshot 2026-11-26 at 11 00 17 AM" src="https://github.com/user-attachments/assets/95b3f0f5-42d8-42b4-879d-40da6a9aa07d" />
+<img width="817" height="156" alt="Screenshot 2026-11-26 at 11 11 04 AM" src="https://github.com/user-attachments/assets/7ba77c54-1f8f-4eaa-be52-360e2ced92a8" />
+
 
 
 <br>
