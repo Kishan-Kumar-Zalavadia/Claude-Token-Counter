@@ -24,6 +24,12 @@
 
 	let usageFetchInFlight = false;
 	let usageFailures = 0;
+	let refreshing = false; // a manual refresh is running (the button spins)
+	let note = null; // { text, until }: a short message shown in place of "Last updated"
+	let lastStreamRefreshMs = 0;
+	let lastUsageRequestMs = 0;
+	let lastManualMs = 0;
+	let pending = null; // { kind: 'old' | 'new', until }: a reply is (probably) running
 	let nextUsageAttemptMs = Infinity; // set once the saved copy has been looked at
 	let restoredFor = null;
 	let restoreInFlight = false;
@@ -225,6 +231,7 @@
 		diag.state.eventsReceived += 1;
 		diag.state.lastEventAt = Date.now();
 		diag.log('USAGE_EVENT');
+		pending = null; // Claude has just reported: no longer waiting
 		if (!raw || !raw.windows || typeof raw.windows !== 'object' || !raw.windows['5h']) {
 			// Weekly-only or empty: say so, change nothing. This is NOT a 0% session.
 			diag.log('NO_SESSION_WINDOW');
@@ -241,14 +248,19 @@
 
 	// ---- /usage -----------------------------------------------------------------------------------
 
+	/**
+	 * Ask /usage once. Returns 'updated' | 'no_data' | 'older' | 'failed' | 'busy' | 'no_org'.
+	 * Scheduled calls re-arm the 2-minute timer; failures back off.
+	 */
 	async function refreshUsage(reason) {
 		const now = Date.now();
 		nextUsageAttemptMs = now + CONST.USAGE_RETRY_MS; // assume failure until a valid answer arrives
-		if (usageFetchInFlight) return;
+		if (usageFetchInFlight) return 'busy';
 		const orgId = await resolveOrg();
-		if (!orgId) return;
+		if (!orgId) return 'no_org';
 
 		usageFetchInFlight = true;
+		lastUsageRequestMs = Date.now();
 		diag.log('REFRESH_TRIGGERED', reason || 'scheduled');
 		diag.log('USAGE_REQUEST', diag.shortId(orgId));
 		let raw = null;
@@ -275,13 +287,13 @@
 			usageFetchInFlight = false;
 		}
 
-		if (orgId !== currentOrgId) return; // the account changed meanwhile
+		if (orgId !== currentOrgId) return 'no_org'; // the account changed meanwhile
 
 		if (!raw || typeof raw !== 'object') {
 			usageFailures += 1;
-			nextUsageAttemptMs = Date.now() + Math.min(CONST.USAGE_RETRY_MS * 2 ** (usageFailures - 1), CONST.USAGE_POLL_MS);
+			nextUsageAttemptMs = Date.now() + Math.min(CONST.USAGE_RETRY_MS * 2 ** (usageFailures - 1), CONST.USAGE_RETRY_MAX_MS);
 			diag.log('USAGE_FAILED', problem || 'no usable answer');
-			return;
+			return 'failed';
 		}
 		usageFailures = 0;
 		nextUsageAttemptMs = Date.now() + CONST.USAGE_POLL_MS;
@@ -291,16 +303,65 @@
 			// Reachable but empty (free plan): a real answer, not an error and not 0%. Keep everything known.
 			// Key names only (never values), so it is possible to see what the endpoint does send.
 			diag.log('USAGE_EMPTY', `fields: ${Object.keys(raw).slice(0, 8).join(',') || 'none'}`);
-			return;
+			return 'no_data';
 		}
 		diag.log('USAGE_OK');
-		apply(parsed, 'usage');
+		return apply(parsed, 'usage') ? 'updated' : 'older';
+	}
+
+	function setNote(text) {
+		note = { text, until: Date.now() + CONST.NOTE_MS };
+		render();
+	}
+
+	/** The refresh button. */
+	async function manualRefresh() {
+		const now = Date.now();
+		if (refreshing || now - lastManualMs < CONST.MANUAL_COOLDOWN_MS) return;
+		lastManualMs = now;
+		refreshing = true;
+		render();
+		let result = 'failed';
+		try {
+			result = await refreshUsage('manual refresh button');
+		} catch {
+			result = 'failed';
+		}
+		refreshing = false;
+		const clock = core.formatClock(Date.now());
+		const text = {
+			updated: `Updated ${clock}`,
+			older: `Checked ${clock}: no newer data`,
+			no_data: `Checked ${clock}: free plan, usage updates after each reply`,
+			failed: `Checked ${clock}: request failed`,
+			busy: `Checked ${clock}: request already running`,
+			no_org: `Checked ${clock}: account not identified`
+		}[result];
+		setNote(text);
+	}
+
+	/** A reply finished: Claude has just counted it, so look soon (not more than every 20 s). */
+	let streamEndTimer = null;
+	function onStreamEnd() {
+		if (streamEndTimer || document.hidden) return;
+		const now = Date.now();
+		if (now - lastStreamRefreshMs < CONST.STREAM_END_MIN_GAP_MS) return;
+		streamEndTimer = setTimeout(() => {
+			streamEndTimer = null;
+			// Any /usage request in the last 20 s already saw this reply: do not repeat it.
+			if (Date.now() - lastUsageRequestMs < CONST.STREAM_END_MIN_GAP_MS) return;
+			lastStreamRefreshMs = Date.now();
+			refreshUsage('reply finished').catch(() => {});
+		}, CONST.STREAM_END_DELAY_MS);
 	}
 
 	// ---- rendering and the clock -------------------------------------------------------------------
 
 	function render() {
-		dashboard.render(state, Date.now(), { orgFailed });
+		const now = Date.now();
+		if (note && now >= note.until) note = null;
+		if (pending && now >= pending.until) pending = null;
+		dashboard.render(state, now, { orgFailed, refreshing, note: note ? note.text : '', pending: !!pending });
 	}
 
 	function tick() {
@@ -331,7 +392,19 @@
 
 	// ---- wiring --------------------------------------------------------------------------------------
 
+	dashboard.onRefresh = () => manualRefresh().catch(() => {});
 	CC.bridge.on('cc:message_limit', handleMessageLimit);
+	CC.bridge.on('cc:stream_end', (payload) => {
+		// The old interface streams the reply on the send request itself: its end is the reply's end.
+		if (payload && payload.kind === 'sse') pending = null;
+		onStreamEnd();
+	});
+	CC.bridge.on('cc:reply_start', (payload) => {
+		const kind = payload && payload.kind === 'old' ? 'old' : 'new';
+		pending = { kind, until: Date.now() + (kind === 'old' ? CONST.PENDING_OLD_MAX_MS : CONST.PENDING_NEW_MAX_MS) };
+		diag.log('REPLY_STARTED', kind);
+		render();
+	});
 	CC.bridge.on('cc:org_detected', (payload) => {
 		// The id the page itself uses is the authority, over cookie and anything else.
 		if (payload?.orgId) setOrg(payload.orgId, 'page request');

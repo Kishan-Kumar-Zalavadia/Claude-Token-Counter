@@ -23,6 +23,7 @@
 			this._mountedOnce = false;
 			this._lastFailLogAt = 0;
 			this._createdAt = Date.now();
+			this.onRefresh = null; // set by main.js
 		}
 
 		_build() {
@@ -37,9 +38,22 @@
 			this.updatedEl = el('span', 'ccr-updated', '');
 			headLeft.appendChild(this.titleEl);
 			headLeft.appendChild(this.updatedEl);
+			const headRight = el('span', 'ccr-headright');
 			this.pctEl = el('span', 'ccr-pct', '--');
+			this.refreshEl = el('button', 'ccr-refresh', '\u21bb');
+			this.refreshEl.setAttribute('type', 'button');
+			this.refreshEl.setAttribute('aria-label', 'Refresh session usage now');
+			this.refreshEl.setAttribute('title', 'Refresh session usage now');
+			this.refreshEl.addEventListener('click', (event) => {
+				// The strip sits inside the composer: the click must not reach the page.
+				event.preventDefault?.();
+				event.stopPropagation?.();
+				if (this.onRefresh) this.onRefresh();
+			});
+			headRight.appendChild(this.pctEl);
+			headRight.appendChild(this.refreshEl);
 			head.appendChild(headLeft);
-			head.appendChild(this.pctEl);
+			head.appendChild(headRight);
 
 			this.barEl = el('div', 'ccr-bar');
 			this.barEl.setAttribute('role', 'progressbar');
@@ -79,6 +93,7 @@
 			else if (prop === 'width') node.style.width = value;
 			else if (prop === 'title') node.setAttribute('title', value);
 			else if (prop === 'hidden') node.classList.toggle('ccr-hidden', !!value);
+			else if (prop === 'busy') node.classList.toggle('ccr-busy', !!value);
 		}
 
 		/** Draw the current state. Safe to call every second. */
@@ -90,6 +105,7 @@
 			this.root.setAttribute('data-status', v.status);
 			this.root.setAttribute('data-level', v.level);
 
+			this._set('busy', this.refreshEl, 'busy', !!(ctx && ctx.refreshing));
 			this._set('pct', this.pctEl, 'text', v.pctText);
 			this._set('fill', this.fillEl, 'width', `${v.barWidth}%`);
 			if (this._last.now !== String(v.pct)) {

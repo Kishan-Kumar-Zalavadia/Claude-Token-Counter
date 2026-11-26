@@ -42,6 +42,7 @@
 		USAGE_EMPTY: ['info', '/usage answered without a five-hour window (normal on the free plan)'],
 		USAGE_OK: ['info', '/usage answered with a five-hour window'],
 		USAGE_FAILED: ['warn', 'network request failed'],
+		REPLY_STARTED: ['debug', 'a message was sent: waiting for the reply to finish'],
 		REFRESH_TRIGGERED: ['info', 'refresh triggered'],
 		WINDOW_EXPIRED: ['info', 'session window ended'],
 		DASHBOARD_MOUNTED: ['info', 'dashboard mounted'],

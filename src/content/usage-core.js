@@ -15,6 +15,8 @@
 	const CC = (globalThis.ClaudeCounter = globalThis.ClaudeCounter || {});
 
 	const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+	const JUST_UPDATED_MS = 30 * 1000;
+	const PENDING_TEXT = 'Reply in progress: usage updates when it finishes';
 
 	function isFiniteNumber(n) {
 		return typeof n === 'number' && Number.isFinite(n);
@@ -148,6 +150,7 @@
 		};
 
 		const w = expire(state, now);
+		const note = ctx.note || '';
 
 		if (!w) {
 			view.message = 'Waiting for session usage data';
@@ -156,6 +159,7 @@
 			view.hint = ctx.orgFailed
 				? 'Could not identify your Claude account yet.'
 				: 'Claude reports usage with its replies: send a message to receive it.';
+			view.updatedText = note || (ctx.pending ? PENDING_TEXT : '');
 			return view;
 		}
 
@@ -165,6 +169,7 @@
 			view.resetLabel = '';
 			view.countdownText = '';
 			view.hint = 'Previous usage is no longer shown. Waiting for new session usage data.';
+			view.updatedText = note || (ctx.pending ? PENDING_TEXT : '');
 			return view;
 		}
 
@@ -186,7 +191,13 @@
 			view.countdownText = 'Reset time unavailable';
 		}
 
-		if (isFiniteNumber(w.received_at)) view.updatedText = `Last updated: ${formatClock(w.received_at)}`;
+		if (isFiniteNumber(w.received_at)) {
+			const age = now - w.received_at;
+			// Fresh data reads "now" for a short while, then the real clock time.
+			view.updatedText = w.source !== 'cache' && age >= 0 && age < JUST_UPDATED_MS ? 'Last updated: now' : `Last updated: ${formatClock(w.received_at)}`;
+		}
+		if (ctx.pending) view.updatedText = PENDING_TEXT;
+		if (note) view.updatedText = note;
 		if (w.source === 'cache') view.hint = 'Restored from your last session; updates with Claude\'s next reply.';
 		return view;
 	}

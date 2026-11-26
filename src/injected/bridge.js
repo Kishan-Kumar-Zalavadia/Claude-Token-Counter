@@ -72,6 +72,19 @@
 			post('cc:org_detected', { orgId: lastOrgId });
 		}
 
+		// A message is being sent. Only a notice: nothing about the request is read or changed.
+		//   old interface: POST .../completion        (certain: the reply streams on this very request)
+		//   new interface: POST .../PerformAction     (also fires when a chat is opened: treated as a hint)
+		try {
+			const method = String((args[1] && args[1].method) || (typeof Request !== 'undefined' && args[0] instanceof Request ? args[0].method : 'GET')).toUpperCase();
+			if (method === 'POST' && url) {
+				if (/\/(retry_)?completion(\?|$)/.test(url)) post('cc:reply_start', { kind: 'old' });
+				else if (url.includes('ConversationService/PerformAction')) post('cc:reply_start', { kind: 'new' });
+			}
+		} catch {
+			// never break the page
+		}
+
 		const response = await originalFetch.apply(window, args);
 
 		try {
@@ -145,6 +158,7 @@
 		} catch {
 			// best-effort; aborted streams are normal
 		}
+		post('cc:stream_end', { kind: 'sse' });
 	}
 
 	// ---------------------------------------------------------------------------------------------
@@ -489,6 +503,7 @@
 			// Aborted or failed streams are normal (the page reopens them); never break claude.ai.
 			diag('STREAM_READ_ENDED', `frames=${stats.frames} limits=${stats.limits}`);
 		}
+		post('cc:stream_end', { kind: 'connect' });
 	}
 
 	// Requests from the content script. Only /usage is needed.

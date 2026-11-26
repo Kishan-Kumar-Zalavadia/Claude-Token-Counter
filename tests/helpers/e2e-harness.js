@@ -39,7 +39,7 @@ function createE2E({
 	const clock = createClock(startMs);
 	const fake = createFakeChrome(storage);
 	const logs = [];
-	const server = { usage: { ...usage }, usageRequests: [], streams: [], organizations: null };
+	const server = { usage: { ...usage }, usageRequests: [], streams: [], organizations: null, openResponses: [] };
 
 	// ---- page world -----------------------------------------------------------------------------
 	const bridge = createBridgeEnv({
@@ -48,6 +48,7 @@ function createE2E({
 				server.usageRequests.push({ at: clock.now, url: String(url) });
 				return new Response(JSON.stringify(server.usage.body), { status: server.usage.status, headers: { 'content-type': 'application/json' } });
 			}
+			if (server.openResponses.length) return server.openResponses.shift();
 			if (String(url).includes('StreamTimeline')) {
 				const next = server.streams.shift();
 				return streamResponse(next ? next.chunks : [], { contentType: next?.contentType || 'application/connect+proto' });
@@ -173,6 +174,30 @@ function createE2E({
 			await bridge.fetch(url, { method: 'GET' });
 			await settle(10);
 			await clock.flush();
+		},
+
+		/**
+		 * The person sends a message: a POST the page makes. `open: true` keeps the reply streaming
+		 * until close() so the "reply in progress" state can be looked at.
+		 */
+		async send(url, { open = false, contentType = 'text/event-stream; charset=utf-8', method = 'POST' } = {}) {
+			let controller;
+			if (open) {
+				const body = new ReadableStream({ start: (c) => (controller = c) });
+				server.openResponses.push(new Response(body, { status: 200, headers: { 'content-type': contentType } }));
+			}
+			const response = await bridge.fetch(url, { method, body: '{}' });
+			await settle(10);
+			await clock.flush();
+			return {
+				response,
+				push: (chunk) => controller.enqueue(new Uint8Array(chunk)),
+				async close() {
+					controller.close();
+					await settle(25);
+					await clock.flush();
+				}
+			};
 		},
 
 		async advance(ms) {

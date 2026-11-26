@@ -58,6 +58,8 @@ test('O02 SSE message_limit: five-hour utilization and reset time are read and s
 	assert.equal(env.text('.ccr-used'), '65% USED');
 	assert.equal(env.text('.ccr-left'), '35% LEFT');
 	assert.equal(env.text('.ccr-countdown'), '04h 33m');
+	assert.equal(env.text('.ccr-updated'), 'Last updated: now');
+	await env.advance(31 * 1000);
 	assert.match(env.text('.ccr-updated'), /^Last updated: \d{1,2}:\d{2}/);
 	assert.equal(env.dashboard().querySelector('.ccr-fill').style.width, '65%');
 });
@@ -243,24 +245,30 @@ test('F01 /usage returns an empty answer: no false 0%, nothing is invented', asy
 	assert.equal(env.diagLines('USAGE_EMPTY').length, 1);
 });
 
-test('F02 an empty /usage is not polled again and again: once, then once an hour', async () => {
+test('F02 /usage is asked every 2 minutes: not faster, not slower (also when it answers with nothing)', async () => {
 	const env = createE2E({ usage: { status: 200, body: { five_hour: null, seven_day: null } } });
 	await env.flush();
-	await env.advance(59 * MIN);
-	assert.equal(env.server.usageRequests.length, 1, 'one request in the first 59 minutes');
-	await env.advance(2 * MIN);
-	assert.equal(env.server.usageRequests.length, 2, 'the next one only after the hour');
+	await env.advance(1500);
+	assert.equal(env.server.usageRequests.length, 1, 'once at start');
+	await env.advance(115 * 1000);
+	assert.equal(env.server.usageRequests.length, 1, 'nothing before the 2 minutes are over');
+	await env.advance(10 * 1000);
+	assert.equal(env.server.usageRequests.length, 2);
+	await env.advance(10 * MIN);
+	const t = env.server.usageRequests.map((r) => r.at);
+	for (let i = 1; i < t.length; i++) assert.ok(t[i] - t[i - 1] >= 2 * MIN - 1000, `gap ${i}: ${(t[i] - t[i - 1]) / 1000}s`);
+	assert.match(env.visibleText(), /Waiting for session usage data/);
+	assert.ok(!/\b0\s*%/.test(env.visibleText()));
 });
 
-test('F03 a failing /usage backs off: 1, 2, 4, 8 ... minutes, never faster, capped at an hour', async () => {
+test('F03 a failing /usage backs off: 1, 2, 4, 8 minutes, then every 10 minutes at most', async () => {
 	const env = createE2E({ usage: { status: 500, body: {} } });
 	await env.flush();
 	await env.advance(2 * H + 10 * MIN);
 	const times = env.server.usageRequests.map((r) => Math.round((r.at - env.server.usageRequests[0].at) / MIN));
 	const gaps = times.slice(1).map((t, i) => t - times[i]);
-	assert.deepEqual(gaps.slice(0, 6), [1, 2, 4, 8, 16, 32]);
-	assert.ok(gaps.every((g) => g >= 1 && g <= 60), `gaps: ${gaps}`);
-	assert.ok(env.server.usageRequests.length <= 12, `requests: ${env.server.usageRequests.length}`);
+	assert.deepEqual(gaps.slice(0, 5), [1, 2, 4, 8, 10]);
+	assert.ok(gaps.every((g) => g >= 1 && g <= 10), `gaps: ${gaps}`);
 	assert.match(env.visibleText(), /Waiting for session usage data/);
 });
 
@@ -338,7 +346,7 @@ test('F09 switching account while the page is open: the previous account\'s usag
 	assert.equal(env.diagLines('ORG_CHANGED').length, 1);
 });
 
-test('F10 a saved window that ended while the page was closed is not shown; fresh data is requested once', async () => {
+test('F10 a saved window that ended while the page was closed is not shown; fresh data is requested at once', async () => {
 	const first = createE2E();
 	await first.reply([frame('limits_5h_first')]);
 	const storage = JSON.parse(JSON.stringify(first.storage));
@@ -351,7 +359,8 @@ test('F10 a saved window that ended while the page was closed is not shown; fres
 	assert.match(later.visibleText(), /Session window ended/);
 	assert.equal(later.server.usageRequests.length, 1);
 	await later.advance(30 * MIN);
-	assert.equal(later.server.usageRequests.length, 1, 'the free plan is asked once, then left alone');
+	assert.ok(later.server.usageRequests.length <= 17, 'at most one request per 2 minutes');
+	assert.ok(!/76/.test(later.visibleText()) && !/\b0\s*%/.test(later.visibleText()));
 });
 
 test('F11 a paid plan: /usage supplies the percent (already 0..100, not multiplied again)', async () => {
@@ -513,20 +522,19 @@ test('C01 five hours, one hour, ten minutes, one second remaining', async () => 
 	assert.equal(env.text('.ccr-countdown'), '00h 01m');
 });
 
-test('C02 the session expires: the old percentage goes away, a refresh is triggered, nothing is faked', async () => {
+test('C02 the session expires: the old percentage goes away and a refresh is made at once, nothing is faked', async () => {
 	const env = createE2E({ usage: { status: 200, body: {} } });
 	await env.reply([limitsFrame(env, { fiveH: [0.8, 10 * MIN] })]);
 	await env.advance(2000);
-	const before = env.server.usageRequests.length;
 	assert.equal(env.text('.ccr-pct'), '80%');
-	await env.advance(10 * MIN);
+	await env.advance(10 * MIN - 5000); // five seconds before the reset
+	const before = env.server.usageRequests.length;
+	await env.advance(6000);
 	assert.match(env.visibleText(), /Session window ended/);
 	assert.ok(!/80/.test(env.visibleText()));
 	assert.ok(!/\b0\s*%/.test(env.visibleText()));
 	assert.equal(env.diagLines('WINDOW_EXPIRED').length, 1);
-	assert.equal(env.server.usageRequests.length, before + 1, 'exactly one refresh at the end of the window');
-	await env.advance(20 * MIN);
-	assert.equal(env.server.usageRequests.length, before + 1, 'and no polling loop afterwards');
+	assert.equal(env.server.usageRequests.length, before + 1, 'a refresh right at the end of the window');
 });
 
 test('C03 after the window ended, the next event starts a fresh one', async () => {
@@ -557,7 +565,7 @@ test('C05 the computer sleeps past the reset: it wakes up expired and asks for f
 	await env.advance(1000);
 	assert.match(env.visibleText(), /Session window ended/);
 	assert.ok(!/50/.test(env.visibleText()));
-	assert.equal(env.server.usageRequests.length, before + 1);
+	assert.equal(env.server.usageRequests.length, before + 1, 'one request, not one per reason (expiry + reply finished)');
 });
 
 test('C06 the reset timestamp is updated by a newer event', async () => {
@@ -721,4 +729,307 @@ test('D04 the dashboard tooltip summarises the diagnosis', async () => {
 	await env.advance(1000);
 	assert.match(env.dashboard().getAttribute('title'), /interface: new/);
 	assert.match(env.dashboard().getAttribute('title'), /usage events: 1/);
+});
+
+// =========================================================================================================
+// REAL-TIME REFRESH: 2-minute polling, reply-finished refresh, manual button
+// =========================================================================================================
+
+const paid = (env, pct, resetInMs) => ({ five_hour: { utilization: pct, resets_at: new Date(env.clock.now + resetInMs).toISOString() } });
+
+test('L01 while the tab is open the usage is refreshed every 2 minutes and the bar follows', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	env.server.usage.body = paid(env, 20, 4 * H);
+	await env.flush();
+	await env.advance(1500);
+	assert.equal(env.text('.ccr-pct'), '20%');
+	env.server.usage.body = paid(env, 31, 4 * H);
+	await env.advance(2 * MIN + 2000);
+	assert.equal(env.text('.ccr-pct'), '31%', 'picked up at the next 2-minute check, no message needed');
+	env.server.usage.body = paid(env, 44, 4 * H);
+	await env.advance(2 * MIN + 2000);
+	assert.equal(env.text('.ccr-pct'), '44%');
+});
+
+test('L02 "Last updated" moves whenever fresh data is received, even when the percentage is the same', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	env.server.usage.body = paid(env, 20, 4 * H);
+	await env.flush();
+	await env.advance(1500);
+	await env.advance(31 * 1000);
+	const first = env.text('.ccr-updated');
+	assert.match(first, /^Last updated: \d{1,2}:\d{2}/);
+	await env.advance(95 * 1000); // shortly after the next 2-minute check, which brings fresh data (same 20%)
+	assert.equal(env.text('.ccr-updated'), 'Last updated: now');
+	assert.equal(env.text('.ccr-pct'), '20%');
+});
+
+test('L03 a hidden tab does not poll; it catches up as soon as it is visible again', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	env.server.usage.body = paid(env, 10, 4 * H);
+	await env.flush();
+	await env.advance(1500);
+	const n = env.server.usageRequests.length;
+	env.dom.document.hidden = true;
+	env.server.usage.body = paid(env, 50, 4 * H);
+	await env.advance(10 * MIN);
+	assert.equal(env.server.usageRequests.length, n);
+	env.dom.document.hidden = false;
+	env.window.dispatchEvent({ type: 'pageshow' });
+	await env.advance(2000);
+	assert.equal(env.text('.ccr-pct'), '50%');
+});
+
+test('L04 a finished reply triggers a refresh a moment later', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	await env.flush();
+	await env.advance(1500);
+	await env.advance(60 * 1000); // not near a scheduled check
+	const n = env.server.usageRequests.length;
+	env.server.usage.body = paid(env, 37, 3 * H);
+	await env.reply([frame('keepalive'), frame('end_cadence')]); // stream ends
+	await env.advance(2500);
+	assert.equal(env.server.usageRequests.length, n + 1);
+	assert.equal(env.text('.ccr-pct'), '37%');
+	assert.equal(env.diagLines('REFRESH_TRIGGERED').some((l) => /reply finished/.test(l.text)), true);
+});
+
+test('L05 reply-finished refreshes are not repeated within 20 seconds and never stack up', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	await env.flush();
+	await env.advance(1500);
+	await env.advance(30 * 1000);
+	const n = env.server.usageRequests.length;
+	for (let i = 0; i < 5; i++) await env.reply([frame('keepalive')]);
+	await env.advance(3000);
+	assert.equal(env.server.usageRequests.length, n + 1);
+});
+
+test('L06 a limits event during a reply updates the bar immediately (no waiting for the next check)', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	await env.reply([limitsFrame(env, { fiveH: [0.2, 3 * H] })]);
+	assert.equal(env.text('.ccr-pct'), '20%');
+	await env.reply([limitsFrame(env, { fiveH: [0.27, 3 * H] })]);
+	assert.equal(env.text('.ccr-pct'), '27%');
+});
+
+function clickRefresh(env) {
+	const button = env.dashboard().querySelector('.ccr-refresh');
+	const event = { prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; } };
+	for (const fn of button.listeners.click || []) fn(event);
+	return { button, event };
+}
+
+test('M01 the refresh button exists, in the dashboard, with an accessible name', async () => {
+	const env = createE2E();
+	const button = env.dashboard().querySelector('.ccr-refresh');
+	assert.ok(button);
+	assert.equal(button.tagName.toLowerCase(), 'button');
+	assert.equal(button.getAttribute('type'), 'button');
+	assert.match(button.getAttribute('aria-label'), /Refresh/);
+});
+
+test('M02 clicking it fetches /usage right now, spins while it runs, and the click does not reach the page', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	await env.flush();
+	await env.advance(1500);
+	const n = env.server.usageRequests.length;
+	env.server.usage.body = paid(env, 63, 2 * H);
+	const { button, event } = clickRefresh(env);
+	assert.equal(event.prevented && event.stopped, true);
+	assert.equal(button.classList.contains('ccr-busy'), true, 'spinning');
+	await env.flush();
+	await env.advance(1000);
+	assert.equal(env.server.usageRequests.length, n + 1);
+	assert.equal(env.text('.ccr-pct'), '63%');
+	assert.equal(button.classList.contains('ccr-busy'), false);
+	assert.match(env.text('.ccr-updated'), /^Updated /);
+});
+
+test('M03 free plan: the button says honestly that Claude sent no data, and shows no number', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	await env.flush();
+	await env.advance(1500);
+	clickRefresh(env);
+	await env.flush();
+	await env.advance(1000);
+	assert.match(env.text('.ccr-updated'), /free plan, usage updates after each reply/);
+	assert.equal(env.text('.ccr-pct'), '--');
+	assert.ok(!/\b0\s*%/.test(env.visibleText()));
+});
+
+test('M04 when the request fails the button says so, and known data is kept', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	await env.reply([limitsFrame(env, { fiveH: [0.4, 3 * H] })]);
+	await env.advance(1500);
+	env.server.usage.status = 500;
+	await env.advance(4 * MIN);
+	clickRefresh(env);
+	await env.flush();
+	await env.advance(1000);
+	assert.match(env.text('.ccr-updated'), /request failed/);
+	assert.equal(env.text('.ccr-pct'), '40%');
+});
+
+test('M05 the note disappears after a few seconds and "Last updated" returns', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	env.server.usage.body = paid(env, 12, 4 * H);
+	await env.flush();
+	await env.advance(1500);
+	clickRefresh(env);
+	await env.flush();
+	await env.advance(1000);
+	assert.match(env.text('.ccr-updated'), /^Updated /);
+	await env.advance(8000);
+	assert.match(env.text('.ccr-updated'), /^Last updated: /);
+});
+
+test('M06 pressing the button repeatedly sends one request, not many', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	await env.flush();
+	await env.advance(1500);
+	const n = env.server.usageRequests.length;
+	for (let i = 0; i < 6; i++) clickRefresh(env);
+	await env.flush();
+	await env.advance(500);
+	assert.equal(env.server.usageRequests.length, n + 1);
+});
+
+test('M07 a manual refresh does not lower the bar to an older window, and never invents a 0%', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	await env.reply([limitsFrame(env, { fiveH: [0.5, 4 * H] })]);
+	await env.advance(1500);
+	env.server.usage.body = paid(env, 9, 1 * H); // resets earlier = an older window
+	clickRefresh(env);
+	await env.flush();
+	await env.advance(1000);
+	assert.equal(env.text('.ccr-pct'), '50%');
+	assert.match(env.text('.ccr-updated'), /no newer data/);
+});
+
+// =========================================================================================================
+// "LAST UPDATED: NOW" FOR 30 SECONDS, AND THE REPLY-IN-PROGRESS STATE
+// =========================================================================================================
+
+test('LU01 fresh data reads "Last updated: now" for 30 seconds, then the real clock time', async () => {
+	const env = createE2E();
+	await env.reply([limitsFrame(env, { fiveH: [0.2, 3 * H] })]);
+	assert.equal(env.text('.ccr-updated'), 'Last updated: now');
+	await env.advance(29 * 1000);
+	assert.equal(env.text('.ccr-updated'), 'Last updated: now');
+	await env.advance(2 * 1000);
+	assert.match(env.text('.ccr-updated'), /^Last updated: \d{1,2}:\d{2}/);
+	assert.ok(!/now/.test(env.text('.ccr-updated')));
+});
+
+test('LU02 every new update restarts the 30 seconds', async () => {
+	const env = createE2E();
+	await env.reply([limitsFrame(env, { fiveH: [0.2, 3 * H] })]);
+	await env.advance(40 * 1000);
+	assert.match(env.text('.ccr-updated'), /^Last updated: \d/);
+	await env.reply([limitsFrame(env, { fiveH: [0.25, 3 * H] })]);
+	assert.equal(env.text('.ccr-updated'), 'Last updated: now');
+});
+
+test('LU03 data restored from storage after a reload shows its real time, never "now"', async () => {
+	const first = createE2E();
+	await first.reply([limitsFrame(first, { fiveH: [0.2, 3 * H] })]);
+	const storage = JSON.parse(JSON.stringify(first.storage));
+	const reloaded = createE2E({ storage, startMs: first.clock.now + 5000 });
+	await reloaded.flush();
+	await reloaded.advance(1500);
+	assert.equal(reloaded.text('.ccr-pct'), '20%');
+	assert.match(reloaded.text('.ccr-updated'), /^Last updated: \d{1,2}:\d{2}/);
+});
+
+const OLD_SEND = `https://claude.ai/api/organizations/${ORG}/chat_conversations/${CONV}/completion`;
+const NEW_SEND = 'https://claude.ai/claudeai-rpc/anthropic.bard.api.v1alpha.ConversationService/PerformAction';
+
+test('P01 old interface: sending shows "Reply in progress" until the reply ends, then the usage is refreshed', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	await env.reply(sse(env, { fiveH: [0.2, 3 * H] }), { url: OLD_SEND });
+	await env.advance(31 * 1000);
+	const reply = await env.send(OLD_SEND, { open: true });
+	await env.advance(1000);
+	assert.match(env.text('.ccr-updated'), /^Reply in progress/);
+	await env.advance(5 * MIN);
+	assert.match(env.text('.ccr-updated'), /^Reply in progress/, 'stays for as long as the reply streams (the old interface says when it ends)');
+	await reply.close();
+	await env.advance(2000);
+	assert.ok(!/Reply in progress/.test(env.text('.ccr-updated')));
+});
+
+test('P02 the usage event of the reply ends the waiting state at once and updates the bar', async () => {
+	const env = createE2E();
+	const reply = await env.send(OLD_SEND, { open: true });
+	await env.advance(1000);
+	assert.match(env.text('.ccr-updated'), /^Reply in progress/);
+	reply.push(sse(env, { fiveH: [0.33, 3 * H] })[0]);
+	await env.flush();
+	await env.advance(1000);
+	assert.equal(env.text('.ccr-pct'), '33%');
+	assert.equal(env.text('.ccr-updated'), 'Last updated: now');
+	await reply.close();
+});
+
+test('P03 new interface: the send request shows the state for at most 30 seconds (it is only a hint)', async () => {
+	const env = createE2E();
+	await env.send(NEW_SEND);
+	await env.advance(1000);
+	assert.match(env.text('.ccr-updated'), /^Reply in progress/);
+	await env.advance(31 * 1000);
+	assert.ok(!/Reply in progress/.test(env.text('.ccr-updated')), 'does not get stuck when no reply follows (e.g. a chat was only opened)');
+});
+
+test('P04 new interface: a limits frame ends the state at once', async () => {
+	const env = createE2E();
+	await env.send(NEW_SEND);
+	await env.advance(1000);
+	assert.match(env.text('.ccr-updated'), /^Reply in progress/);
+	await env.reply([limitsFrame(env, { fiveH: [0.4, 3 * H] })]);
+	assert.equal(env.text('.ccr-pct'), '40%');
+	assert.ok(!/Reply in progress/.test(env.text('.ccr-updated')));
+});
+
+test('P05 requests that are not sends (GET, other URLs) never set the state', async () => {
+	const env = createE2E();
+	await env.send(OLD_SEND, { method: 'GET' });
+	await env.pageRequest(`https://claude.ai/api/organizations/${ORG}/chat_conversations/${CONV}?tree=true`);
+	await env.pageRequest('https://claude.ai/api/organizations/' + ORG + '/completion_stats');
+	await env.advance(2000);
+	assert.ok(!/Reply in progress/.test(env.visibleText()));
+	assert.equal(env.diagLines('REPLY_STARTED').length, 0);
+});
+
+test('P06 while a reply is in progress the usage data and countdown stay visible and correct', async () => {
+	const env = createE2E();
+	await env.reply([limitsFrame(env, { fiveH: [0.5, 3 * H] })]);
+	await env.send(OLD_SEND, { open: true });
+	await env.advance(2 * MIN);
+	assert.equal(env.text('.ccr-pct'), '50%');
+	assert.equal(env.text('.ccr-countdown'), '02h 58m');
+});
+
+test('P07 sending a message does not touch the request: same url, same options object', async () => {
+	let seen;
+	const { createBridgeEnv } = require('./helpers/bridge-harness');
+	const b = createBridgeEnv({ originalFetch: async (...args) => ((seen = args), new Response('{}', { headers: { 'content-type': 'application/json' } })) });
+	const opts = { method: 'POST', body: '{"prompt":"hi"}', headers: { 'content-type': 'application/json' } };
+	await b.fetch(OLD_SEND, opts);
+	assert.equal(seen[0], OLD_SEND);
+	assert.equal(seen[1], opts);
+	assert.ok(b.events('cc:reply_start').length === 1);
+});
+
+test('P08 an error message from a manual refresh wins over the waiting state, then it returns', async () => {
+	const env = createE2E({ usage: { status: 200, body: {} } });
+	await env.flush();
+	await env.advance(1500);
+	await env.send(OLD_SEND, { open: true });
+	clickRefresh(env);
+	await env.flush();
+	await env.advance(1000);
+	assert.match(env.text('.ccr-updated'), /^Checked /);
+	await env.advance(8000);
+	assert.match(env.text('.ccr-updated'), /^Reply in progress/);
 });

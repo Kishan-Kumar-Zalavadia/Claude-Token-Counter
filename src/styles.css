@@ -57,6 +57,45 @@ html[data-mode='dark'] .ccr-dashboard {
 	min-width: 0;
 }
 
+.ccr-headright {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.ccr-refresh {
+	all: unset;
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	font-size: 12px;
+	line-height: 1;
+	color: var(--ccr-muted);
+	cursor: pointer;
+	user-select: none;
+}
+
+.ccr-refresh:hover,
+.ccr-refresh:focus-visible {
+	color: inherit;
+	background: var(--ccr-track);
+}
+
+.ccr-refresh.ccr-busy {
+	cursor: progress;
+	animation: ccr-spin 0.9s linear infinite;
+}
+
+@keyframes ccr-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
 .ccr-updated {
 	font-size: 10px;
 	font-variant-numeric: tabular-nums;
@@ -141,5 +180,8 @@ html[data-mode='dark'] .ccr-dashboard {
 @media (prefers-reduced-motion: reduce) {
 	.ccr-fill {
 		transition: none;
+	}
+	.ccr-refresh.ccr-busy {
+		animation: none;
 	}
 }
